@@ -1,15 +1,15 @@
-#include <atomic>
 #include <thread>
 #include <chrono>
 #include <string>
 #include <iostream>
 #include <sstream>
 #include <mutex>
+#include <stop_token>
+
 using namespace std::chrono_literals;
 
 
 class Teleoperate {
-    std::atomic<bool> ok;
     std::mutex mtx;
     std::chrono::time_point<std::chrono::system_clock> end_time{std::chrono::time_point<std::chrono::system_clock>::max()};
     void setSpeed(int lspeed, int rspeed) {printf(" L:%2d  R:%2d\n", lspeed, rspeed);}
@@ -17,23 +17,23 @@ class Teleoperate {
         setSpeed(0, 0);
         end_time = std::chrono::time_point<std::chrono::system_clock>::max();
     }
-
-    void checkTimeOut() {
-        while (ok) {
-            {
-                std::lock_guard lck(mtx);
-                if (std::chrono::system_clock::now() > end_time) {
-                    stop();
-                }
-            }
-            std::this_thread::sleep_for(1ms);
-        }
-    }
 public:
 
     void run() {
-        ok = true;
-        std::thread thread(&Teleoperate::checkTimeOut, this);
+        std::jthread jthread([&](std::stop_token stoken){
+            while (!stoken.stop_requested()) {
+                {
+                    std::lock_guard lck(mtx);
+                    if (std::chrono::system_clock::now() > end_time) {
+                        stop();
+                    }
+                }
+                std::this_thread::sleep_for(1ms);
+            }
+            std::lock_guard lck(mtx);
+            stop();
+        });
+
         for (std::string line; std::getline(std::cin, line);) {
             char command = 's';
             int value = 0;
@@ -68,8 +68,6 @@ public:
             end_time = std::chrono::system_clock::now() + std::chrono::milliseconds(value);
         }
 
-        ok = false;
-        thread.join();
     }
 };
 
